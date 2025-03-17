@@ -2,6 +2,9 @@ import RustXcframework
 public func new_replica_in_memory() -> Replica {
     Replica(ptr: __swift_bridge__$new_replica_in_memory())
 }
+public func new_replica_on_disk<GenericIntoRustString: IntoRustString>(_ taskdb_dir: GenericIntoRustString, _ create_if_missing: Bool, _ read_write: Bool) -> Replica {
+    Replica(ptr: __swift_bridge__$new_replica_on_disk({ let rustString = taskdb_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), create_if_missing, read_write))
+}
 public func new_operations() -> RustVec<Operation> {
     RustVec(ptr: __swift_bridge__$new_operations())
 }
@@ -189,11 +192,37 @@ public class TaskDataRefMut: TaskDataRef {
         super.init(ptr: ptr)
     }
 }
+extension TaskDataRefMut {
+    public func update<GenericIntoRustString: IntoRustString>(_ property: GenericIntoRustString, _ value: GenericIntoRustString, _ ops: RustVec<Operation>) {
+        __swift_bridge__$TaskData$update(ptr, { let rustString = property.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = value.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let val = ops; val.isOwned = false; return val.ptr }())
+    }
+
+    public func update_remove<GenericIntoRustString: IntoRustString>(_ property: GenericIntoRustString, _ ops: RustVec<Operation>) {
+        __swift_bridge__$TaskData$update_remove(ptr, { let rustString = property.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let val = ops; val.isOwned = false; return val.ptr }())
+    }
+
+    public func delete_task(_ ops: RustVec<Operation>) {
+        __swift_bridge__$TaskData$delete_task(ptr, { let val = ops; val.isOwned = false; return val.ptr }())
+    }
+}
 public class TaskDataRef {
     var ptr: UnsafeMutableRawPointer
 
     public init(ptr: UnsafeMutableRawPointer) {
         self.ptr = ptr
+    }
+}
+extension TaskDataRef {
+    public func get_uuid() -> Uuid {
+        Uuid(ptr: __swift_bridge__$TaskData$get_uuid(ptr))
+    }
+
+    public func has<GenericIntoRustString: IntoRustString>(_ property: GenericIntoRustString) -> Bool {
+        __swift_bridge__$TaskData$has(ptr, { let rustString = property.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
+    }
+
+    public func properties() -> RustVec<RustString> {
+        RustVec(ptr: __swift_bridge__$TaskData$properties(ptr))
     }
 }
 extension TaskData: Vectorizable {
@@ -319,6 +348,3 @@ extension Uuid: Vectorizable {
         __swift_bridge__$Vec_Uuid$len(vecPtr)
     }
 }
-
-
-
