@@ -2,6 +2,9 @@ import RustXcframework
 public func new_replica_in_memory() -> Replica {
     Replica(ptr: __swift_bridge__$new_replica_in_memory())
 }
+public func new_replica_on_disk<GenericIntoRustString: IntoRustString>(_ taskdb_dir: GenericIntoRustString, _ create_if_missing: Bool, _ read_write: Bool) -> Replica {
+    Replica(ptr: __swift_bridge__$new_replica_on_disk({ let rustString = taskdb_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), create_if_missing, read_write))
+}
 public func new_operations() -> RustVec<Operation> {
     RustVec(ptr: __swift_bridge__$new_operations())
 }
@@ -33,6 +36,14 @@ public class ReplicaRefMut: ReplicaRef {
 extension ReplicaRefMut {
     public func all_task_data() -> Optional<RustVec<TaskData>> {
         { let val = __swift_bridge__$Replica$all_task_data(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
+    }
+
+    public func all_tasks() -> Optional<RustVec<Task>> {
+        { let val = __swift_bridge__$Replica$all_tasks(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
+    }
+
+    public func pending_tasks() -> Optional<RustVec<Task>> {
+        { let val = __swift_bridge__$Replica$pending_tasks(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
     }
 
     public func commit_operations(_ ops: RustVec<Operation>) {
@@ -196,6 +207,11 @@ public class TaskDataRef {
         self.ptr = ptr
     }
 }
+extension TaskDataRef {
+    public func get_uuid() -> Uuid {
+        Uuid(ptr: __swift_bridge__$TaskData$get_uuid(ptr))
+    }
+}
 extension TaskData: Vectorizable {
     public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
         __swift_bridge__$Vec_TaskData$new()
@@ -246,6 +262,270 @@ extension TaskData: Vectorizable {
 }
 
 
+public class Task: TaskRefMut {
+    var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$Task$_free(ptr)
+        }
+    }
+}
+public class TaskRefMut: TaskRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class TaskRef {
+    var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension TaskRef {
+    public func get_uuid() -> Uuid {
+        Uuid(ptr: __swift_bridge__$Task$get_uuid(ptr))
+    }
+
+    public func get_description() -> RustString {
+        RustString(ptr: __swift_bridge__$Task$get_description(ptr))
+    }
+
+    public func get_status() -> Status {
+        Status(ptr: __swift_bridge__$Task$get_status(ptr))
+    }
+
+    public func get_due() -> Optional<RustString> {
+        { let val = __swift_bridge__$Task$get_due(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
+    }
+
+    public func get_priority() -> RustString {
+        RustString(ptr: __swift_bridge__$Task$get_priority(ptr))
+    }
+
+    public func get_annotations() -> RustVec<Annotation> {
+        RustVec(ptr: __swift_bridge__$Task$get_annotations(ptr))
+    }
+
+    public func get_project() -> Optional<RustString> {
+        { let val = __swift_bridge__$Task$get_project(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
+    }
+}
+extension Task: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_Task$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_Task$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: Task) {
+        __swift_bridge__$Vec_Task$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_Task$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (Task(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<TaskRef> {
+        let pointer = __swift_bridge__$Vec_Task$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return TaskRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<TaskRefMut> {
+        let pointer = __swift_bridge__$Vec_Task$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return TaskRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<TaskRef> {
+        UnsafePointer<TaskRef>(OpaquePointer(__swift_bridge__$Vec_Task$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_Task$len(vecPtr)
+    }
+}
+
+
+public class Annotation: AnnotationRefMut {
+    var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$Annotation$_free(ptr)
+        }
+    }
+}
+public class AnnotationRefMut: AnnotationRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class AnnotationRef {
+    var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension AnnotationRef {
+    public func get_description() -> RustString {
+        RustString(ptr: __swift_bridge__$Annotation$get_description(ptr))
+    }
+}
+extension Annotation: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_Annotation$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_Annotation$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: Annotation) {
+        __swift_bridge__$Vec_Annotation$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_Annotation$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (Annotation(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<AnnotationRef> {
+        let pointer = __swift_bridge__$Vec_Annotation$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return AnnotationRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<AnnotationRefMut> {
+        let pointer = __swift_bridge__$Vec_Annotation$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return AnnotationRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<AnnotationRef> {
+        UnsafePointer<AnnotationRef>(OpaquePointer(__swift_bridge__$Vec_Annotation$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_Annotation$len(vecPtr)
+    }
+}
+
+
+public class Status: StatusRefMut {
+    var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$Status$_free(ptr)
+        }
+    }
+}
+public class StatusRefMut: StatusRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class StatusRef {
+    var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension StatusRef {
+    public func get_value() -> RustString {
+        RustString(ptr: __swift_bridge__$Status$get_value(ptr))
+    }
+}
+extension Status: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_Status$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_Status$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: Status) {
+        __swift_bridge__$Vec_Status$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_Status$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (Status(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<StatusRef> {
+        let pointer = __swift_bridge__$Vec_Status$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return StatusRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<StatusRefMut> {
+        let pointer = __swift_bridge__$Vec_Status$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return StatusRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<StatusRef> {
+        UnsafePointer<StatusRef>(OpaquePointer(__swift_bridge__$Vec_Status$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_Status$len(vecPtr)
+    }
+}
+
+
 public class Uuid: UuidRefMut {
     var isOwned: Bool = true
 
@@ -269,6 +549,11 @@ public class UuidRef {
 
     public init(ptr: UnsafeMutableRawPointer) {
         self.ptr = ptr
+    }
+}
+extension UuidRef {
+    public func to_string() -> RustString {
+        RustString(ptr: __swift_bridge__$Uuid$to_string(ptr))
     }
 }
 extension Uuid: Vectorizable {
@@ -319,6 +604,3 @@ extension Uuid: Vectorizable {
         __swift_bridge__$Vec_Uuid$len(vecPtr)
     }
 }
-
-
-
