@@ -8,8 +8,8 @@ public func new_replica_on_disk<GenericIntoRustString: IntoRustString>(_ taskdb_
 public func new_operations() -> RustVec<Operation> {
     RustVec(ptr: __swift_bridge__$new_operations())
 }
-public func create_task(_ uuid: Uuid, _ ops: RustVec<Operation>) -> RustVec<Operation> {
-    RustVec(ptr: __swift_bridge__$create_task({uuid.isOwned = false; return uuid.ptr;}(), { let val = ops; val.isOwned = false; return val.ptr }()))
+public func create_annotation<GenericIntoRustString: IntoRustString>(_ description: GenericIntoRustString, _ entry: GenericIntoRustString) -> Optional<Annotation> {
+    { let val = __swift_bridge__$create_annotation({ let rustString = description.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = entry.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val != nil { return Annotation(ptr: val!) } else { return nil } }()
 }
 public func uuid_v4() -> Uuid {
     Uuid(ptr: __swift_bridge__$uuid_v4())
@@ -42,12 +42,28 @@ extension ReplicaRefMut {
         { let val = __swift_bridge__$Replica$all_tasks(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
     }
 
+    public func get_task<GenericIntoRustString: IntoRustString>(_ uuid: GenericIntoRustString) -> Optional<Task> {
+        { let val = __swift_bridge__$Replica$get_task(ptr, { let rustString = uuid.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val != nil { return Task(ptr: val!) } else { return nil } }()
+    }
+
     public func pending_tasks() -> Optional<RustVec<Task>> {
         { let val = __swift_bridge__$Replica$pending_tasks(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
     }
 
     public func commit_operations(_ ops: RustVec<Operation>) {
         __swift_bridge__$Replica$commit_operations(ptr, { let val = ops; val.isOwned = false; return val.ptr }())
+    }
+
+    public func sync_local_server<GenericIntoRustString: IntoRustString>(_ server_dir: GenericIntoRustString) -> Bool {
+        __swift_bridge__$Replica$sync_local_server(ptr, { let rustString = server_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
+    }
+
+    public func create_task<GenericIntoRustString: IntoRustString>(_ uuid: GenericIntoRustString, _ description: GenericIntoRustString, _ due: Optional<GenericIntoRustString>, _ priority: Optional<GenericIntoRustString>, _ project: Optional<GenericIntoRustString>) -> Optional<Task> {
+        { let val = __swift_bridge__$Replica$create_task(ptr, { let rustString = uuid.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = description.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(due) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(priority) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(project) { rustString.isOwned = false; return rustString.ptr } else { return nil } }()); if val != nil { return Task(ptr: val!) } else { return nil } }()
+    }
+
+    public func update_task<GenericIntoRustString: IntoRustString>(_ uuid: GenericIntoRustString, _ description: GenericIntoRustString, _ due: Optional<GenericIntoRustString>, _ priority: Optional<GenericIntoRustString>, _ project: Optional<GenericIntoRustString>, _ status: GenericIntoRustString, _ annotations: Optional<RustVec<Annotation>>) -> Optional<Task> {
+        { let val = __swift_bridge__$Replica$update_task(ptr, { let rustString = uuid.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = description.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(due) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(priority) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(project) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { let rustString = status.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let val = annotations { val.isOwned = false; return val.ptr } else { return nil } }()); if val != nil { return Task(ptr: val!) } else { return nil } }()
     }
 }
 public class ReplicaRef {

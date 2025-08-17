@@ -14,8 +14,28 @@ mod ffi {
         ) -> Replica;
         fn all_task_data(&mut self) -> Option<Vec<TaskData>>;
         fn all_tasks(&mut self) -> Option<Vec<Task>>;
+        fn get_task(&mut self, uuid: String) -> Option<Task>;
         fn pending_tasks(&mut self) -> Option<Vec<Task>>;
         fn commit_operations(&mut self, ops: Vec<Operation>);
+        fn sync_local_server(&mut self, server_dir: String) -> bool;
+        fn create_task(
+            &mut self,
+            uuid: String,
+            description: String,
+            due: Option<String>,
+            priority: Option<String>,
+            project: Option<String>,
+        ) -> Option<Task>;
+        fn update_task(
+            &mut self,
+            uuid: String,
+            description: String,
+            due: Option<String>,
+            priority: Option<String>,
+            project: Option<String>,
+            status: String,
+            annotations: Option<Vec<Annotation>>,
+        ) -> Option<Task>;
     }
 
     extern "Rust" {
@@ -27,7 +47,6 @@ mod ffi {
     extern "Rust" {
         type TaskData;
 
-        fn create_task(uuid: Uuid, ops: Vec<Operation>) -> Vec<Operation>;
         fn get_uuid(&self) -> Uuid;
     }
 
@@ -47,6 +66,7 @@ mod ffi {
         type Annotation;
 
         fn get_description(&self) -> String;
+        fn create_annotation(description: String, entry: String) -> Option<Annotation>;
     }
 
     extern "Rust" {
@@ -106,10 +126,188 @@ impl Replica {
         Some(tasks.drain().map(|(_, t)| Task(t)).collect())
     }
 
+    fn get_task(&mut self, uuid: String) -> Option<Task> {
+        let replica = &mut self.0;
+        let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+        let task = replica.get_task(uuid);
+        if task.is_err() {
+            return None;
+        }
+        let task = task.unwrap();
+        if task.is_none() {
+            return None;
+        }
+        let task = task.unwrap();
+        return Some(Task(task));
+    }
+
     fn pending_tasks(&mut self) -> Option<Vec<Task>> {
         let replica = &mut self.0;
         let mut tasks = replica.pending_tasks().unwrap();
         Some(tasks.drain(..).map(Task).collect())
+    }
+
+    fn sync_local_server(&mut self, server_dir: String) -> bool {
+        let server_config = tc::ServerConfig::Local {
+            server_dir: PathBuf::from(server_dir),
+        };
+        let server = server_config.into_server();
+        if server.is_err() {
+            return false;
+        }
+        let res = self.0.sync(&mut server.unwrap(), false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
+
+    fn create_task(
+        &mut self,
+        uuid: String,
+        description: String,
+        due: Option<String>,
+        priority: Option<String>,
+        project: Option<String>,
+    ) -> Option<Task> {
+        let replica = &mut self.0;
+        let mut ops = tc::Operations::new();
+        let uuid = tc::Uuid::parse_str(&uuid);
+        if uuid.is_err() {
+            return None;
+        }
+        let task = replica.create_task(uuid.unwrap(), &mut ops);
+        if task.is_err() {
+            return None;
+        }
+
+        let mut new_task = task.unwrap();
+        let res = new_task.set_description(description, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let res = new_task.set_status(tc::Status::Pending, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+        let res = new_task.set_value("project", project, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let priority = priority.unwrap_or_else(|| "none".to_string());
+        let res = new_task.set_priority(priority, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        if let Some(due) = due {
+            let secs = due.parse::<i64>();
+            if secs.is_err() {
+                return None;
+            }
+            let timestamp = tc::utc_timestamp(secs.unwrap());
+            let res = new_task.set_due(Option::from(timestamp), &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
+        let res = replica.commit_operations(ops);
+        if res.is_err() {
+            return None;
+        }
+
+        return Some(Task(new_task));
+    }
+
+    fn update_task(
+        &mut self,
+        uuid: String,
+        description: String,
+        due: Option<String>,
+        priority: Option<String>,
+        project: Option<String>,
+        status: String,
+        annotations: Option<Vec<Annotation>>,
+    ) -> Option<Task> {
+        let replica = &mut self.0;
+        let uuid = tc::Uuid::parse_str(&uuid);
+        if uuid.is_err() {
+            return None;
+        }
+
+        let task = replica.get_task(uuid.unwrap());
+
+        if task.is_err() {
+            return None;
+        }
+
+        let tasker = task.unwrap();
+        if tasker.is_none() {
+            return None;
+        }
+        let mut new_task = tasker.unwrap();
+
+        let mut ops = tc::Operations::new();
+
+        let res = new_task.set_description(description, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let res = new_task.set_status(tc::Status::Pending, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+        let res = new_task.set_value("project", project, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let priority = priority.unwrap_or_else(|| "none".to_string());
+        let res = new_task.set_priority(priority, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let status = status_from_string(&status);
+        let res = new_task.set_status(status, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        for annotation in annotations.unwrap_or_default() {
+            let res = new_task.add_annotation(annotation.0.clone(), &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
+        if let Some(due) = due {
+            let secs = due.parse::<i64>();
+            if secs.is_err() {
+                return None;
+            }
+            let timestamp = tc::utc_timestamp(secs.unwrap());
+            let res = new_task.set_due(Option::from(timestamp), &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        } else {
+            let res = new_task.set_due(None, &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
+        let res = replica.commit_operations(ops);
+        if res.is_err() {
+            return None;
+        }
+
+        return Some(Task(new_task));
     }
 
     fn commit_operations(&mut self, ops: Vec<Operation>) {
@@ -212,6 +410,16 @@ impl Status {
     }
 }
 
+pub fn status_from_string(s: &str) -> tc::Status {
+    match s {
+        "pending" => tc::Status::Pending,
+        "completed" => tc::Status::Completed,
+        "deleted" => tc::Status::Deleted,
+        "recurring" => tc::Status::Recurring,
+        v => tc::Status::Unknown(v.to_string()),
+    }
+}
+
 // ANNOTATION
 pub struct Annotation(tc::Annotation);
 
@@ -227,18 +435,13 @@ impl Annotation {
     }
 }
 
-// GLOBALS
-
-fn operations_ref(ops: Vec<Operation>) -> Vec<tc::Operation> {
-    // SAFETY: Operation is a transparent newtype for tc::Operation, so a Vec of one is a
-    // Vec of the other.
-    unsafe { std::mem::transmute::<Vec<Operation>, Vec<tc::Operation>>(ops) }
-}
-
-fn create_task(uuid: Uuid, ops: Vec<Operation>) -> Vec<Operation> {
-    let mut opRef = operations_ref(ops).clone();
-    tc::TaskData::create(uuid.into(), &mut opRef);
-    unsafe { std::mem::transmute::<Vec<tc::Operation>, Vec<Operation>>(opRef) }
+fn create_annotation(description: String, entry: String) -> Option<Annotation> {
+    let secs = entry.parse::<i64>();
+    if secs.is_err() {
+        return None;
+    }
+    let entry = tc::utc_timestamp(secs.unwrap());
+    Some(Annotation(tc::Annotation { entry, description }))
 }
 
 // UUID
@@ -297,18 +500,5 @@ mod tests {
     fn create_uuid() {
         let uuid = uuid_v4();
         assert!(uuid.v[0] != 0);
-    }
-
-    #[test]
-    fn create_task_test() {
-        let mut replica = new_replica_in_memory();
-        let mut tasks = replica.all_task_data().unwrap();
-        assert_eq!(tasks.len(), 0);
-        let mut ops = new_operations();
-        ops = create_task(uuid_v4(), ops);
-        assert_eq!(ops.len(), 1);
-        replica.commit_operations(ops);
-        tasks = replica.all_task_data().unwrap();
-        assert_eq!(tasks.len(), 1);
     }
 }
