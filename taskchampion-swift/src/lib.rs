@@ -18,6 +18,18 @@ mod ffi {
         fn pending_tasks(&mut self) -> Option<Vec<Task>>;
         fn commit_operations(&mut self, ops: Vec<Operation>);
         fn sync_local_server(&mut self, server_dir: String) -> bool;
+        fn sync_remote_server(
+            &mut self,
+            url: String,
+            client_id: String,
+            encryption_secret: String,
+        ) -> bool;
+        fn sync_gcp(
+            &mut self,
+            bucket: String,
+            credential_path: Option<String>,
+            encryption_secret: String,
+        ) -> bool;
         fn create_task(
             &mut self,
             uuid: String,
@@ -161,6 +173,80 @@ impl Replica {
         }
         true
     }
+
+    fn sync_remote_server(
+        &mut self,
+        url: String,
+        client_id: String,
+        encryption_secret: String,
+    ) -> bool {
+        let uuid = tc::Uuid::parse_str(&client_id);
+        if uuid.is_err() {
+            return false;
+        }
+
+        let secret: Vec<u8> = encryption_secret.into_bytes();
+
+        let server_config = tc::ServerConfig::Remote {
+            url: url,
+            client_id: uuid.unwrap(),
+            encryption_secret: secret,
+        };
+        let server = server_config.into_server();
+        if server.is_err() {
+            return false;
+        }
+        let res = self.0.sync(&mut server.unwrap(), false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
+
+    fn sync_gcp(
+        &mut self,
+        bucket: String,
+        credential_path: Option<String>,
+        encryption_secret: String,
+    ) -> bool {
+        let secret: Vec<u8> = encryption_secret.into_bytes();
+        let server_config = tc::ServerConfig::Gcp {
+            bucket: bucket,
+            credential_path: credential_path,
+            encryption_secret: secret,
+        };
+
+        let server = server_config.into_server();
+        if server.is_err() {
+            return false;
+        }
+        let res = self.0.sync(&mut server.unwrap(), false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
+
+    // TODO: Implement AWS sync
+    // fn sync_aws(&mut self, region: String, bucket: String, encryption_secret: String) -> bool {
+    //     let secret: Vec<u8> = encryption_secret.into_bytes();
+    //
+    //     let server_config = tc::ServerConfig::Aws {
+    //         region: region,
+    //         bucket: bucket,
+    //         credentials:,
+    //         encryption_secret: secret,
+    //     };
+    //     let server = server_config.into_server();
+    //     if server.is_err() {
+    //         return false;
+    //     }
+    //     let res = self.0.sync(&mut server.unwrap(), false);
+    //     if res.is_err() {
+    //         return false;
+    //     }
+    //     true
+    // }
 
     fn create_task(
         &mut self,
