@@ -58,6 +58,14 @@ extension ReplicaRefMut {
         __swift_bridge__$Replica$sync_local_server(ptr, { let rustString = server_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
 
+    public func sync_remote_server<GenericIntoRustString: IntoRustString>(_ url: GenericIntoRustString, _ client_id: GenericIntoRustString, _ encryption_secret: GenericIntoRustString) -> Bool {
+        __swift_bridge__$Replica$sync_remote_server(ptr, { let rustString = url.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = client_id.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
+    }
+
+    public func sync_gcp<GenericIntoRustString: IntoRustString>(_ bucket: GenericIntoRustString, _ credential_path: Optional<GenericIntoRustString>, _ encryption_secret: GenericIntoRustString) -> Bool {
+        __swift_bridge__$Replica$sync_gcp(ptr, { let rustString = bucket.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(credential_path) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
+    }
+
     public func create_task<GenericIntoRustString: IntoRustString>(_ uuid: GenericIntoRustString, _ description: GenericIntoRustString, _ due: Optional<GenericIntoRustString>, _ priority: Optional<GenericIntoRustString>, _ project: Optional<GenericIntoRustString>) -> Optional<Task> {
         { let val = __swift_bridge__$Replica$create_task(ptr, { let rustString = uuid.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = description.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(due) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(priority) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(project) { rustString.isOwned = false; return rustString.ptr } else { return nil } }()); if val != nil { return Task(ptr: val!) } else { return nil } }()
     }
