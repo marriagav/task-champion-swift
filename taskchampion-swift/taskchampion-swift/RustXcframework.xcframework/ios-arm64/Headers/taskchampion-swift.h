@@ -93,6 +93,7 @@ void* __swift_bridge__$Replica$get_task(void* self, void* uuid);
 void* __swift_bridge__$Replica$pending_tasks(void* self);
 void __swift_bridge__$Replica$commit_operations(void* self, void* ops);
 bool __swift_bridge__$Replica$sync_local_server(void* self, void* server_dir);
+bool __swift_bridge__$Replica$sync_no_server(void* self);
 bool __swift_bridge__$Replica$sync_remote_server(void* self, void* url, void* client_id, void* encryption_secret);
 bool __swift_bridge__$Replica$sync_gcp(void* self, void* bucket, void* credential_path, void* encryption_secret);
 void* __swift_bridge__$Replica$create_task(void* self, void* uuid, void* description, void* due, void* priority, void* project);

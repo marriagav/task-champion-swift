@@ -18,6 +18,7 @@ mod ffi {
         fn pending_tasks(&mut self) -> Option<Vec<Task>>;
         fn commit_operations(&mut self, ops: Vec<Operation>);
         fn sync_local_server(&mut self, server_dir: String) -> bool;
+        fn sync_no_server(&mut self) -> bool;
         fn sync_remote_server(
             &mut self,
             url: String,
@@ -168,6 +169,14 @@ impl Replica {
             return false;
         }
         let res = self.0.sync(&mut server.unwrap(), false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
+
+    fn sync_no_server(&mut self) -> bool {
+        let res = self.0.rebuild_working_set(false);
         if res.is_err() {
             return false;
         }

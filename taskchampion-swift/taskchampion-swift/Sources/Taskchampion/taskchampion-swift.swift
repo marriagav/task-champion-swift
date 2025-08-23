@@ -58,6 +58,10 @@ extension ReplicaRefMut {
         __swift_bridge__$Replica$sync_local_server(ptr, { let rustString = server_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
 
+    public func sync_no_server() -> Bool {
+        __swift_bridge__$Replica$sync_no_server(ptr)
+    }
+
     public func sync_remote_server<GenericIntoRustString: IntoRustString>(_ url: GenericIntoRustString, _ client_id: GenericIntoRustString, _ encryption_secret: GenericIntoRustString) -> Bool {
         __swift_bridge__$Replica$sync_remote_server(ptr, { let rustString = url.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = client_id.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
