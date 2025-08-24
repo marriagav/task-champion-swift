@@ -96,6 +96,7 @@ bool __swift_bridge__$Replica$sync_local_server(void* self, void* server_dir);
 bool __swift_bridge__$Replica$sync_no_server(void* self);
 bool __swift_bridge__$Replica$sync_remote_server(void* self, void* url, void* client_id, void* encryption_secret);
 bool __swift_bridge__$Replica$sync_gcp(void* self, void* bucket, void* credential_path, void* encryption_secret);
+bool __swift_bridge__$Replica$sync_aws(void* self, void* region, void* bucket, void* access_key_id, void* secret_access_key, void* encryption_secret);
 void* __swift_bridge__$Replica$create_task(void* self, void* uuid, void* description, void* due, void* priority, void* project);
 void* __swift_bridge__$Replica$update_task(void* self, void* uuid, void* description, void* due, void* priority, void* project, void* status, void* annotations);
 void* __swift_bridge__$new_operations(void);
