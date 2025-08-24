@@ -10,7 +10,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 swift-bridge = "0.1"
-taskchampion = "=2.0.2"
+taskchampion = "=2.0.3"
 
 [features]
 # use native CA roots, instead of bundled

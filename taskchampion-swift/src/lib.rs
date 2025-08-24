@@ -18,6 +18,7 @@ mod ffi {
         fn pending_tasks(&mut self) -> Option<Vec<Task>>;
         fn commit_operations(&mut self, ops: Vec<Operation>);
         fn sync_local_server(&mut self, server_dir: String) -> bool;
+        fn sync_no_server(&mut self) -> bool;
         fn sync_remote_server(
             &mut self,
             url: String,
@@ -28,6 +29,14 @@ mod ffi {
             &mut self,
             bucket: String,
             credential_path: Option<String>,
+            encryption_secret: String,
+        ) -> bool;
+        fn sync_aws(
+            &mut self,
+            region: String,
+            bucket: String,
+            access_key_id: String,
+            secret_access_key: String,
             encryption_secret: String,
         ) -> bool;
         fn create_task(
@@ -174,6 +183,14 @@ impl Replica {
         true
     }
 
+    fn sync_no_server(&mut self) -> bool {
+        let res = self.0.rebuild_working_set(false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
+
     fn sync_remote_server(
         &mut self,
         url: String,
@@ -227,26 +244,37 @@ impl Replica {
         true
     }
 
-    // TODO: Implement AWS sync
-    // fn sync_aws(&mut self, region: String, bucket: String, encryption_secret: String) -> bool {
-    //     let secret: Vec<u8> = encryption_secret.into_bytes();
-    //
-    //     let server_config = tc::ServerConfig::Aws {
-    //         region: region,
-    //         bucket: bucket,
-    //         credentials:,
-    //         encryption_secret: secret,
-    //     };
-    //     let server = server_config.into_server();
-    //     if server.is_err() {
-    //         return false;
-    //     }
-    //     let res = self.0.sync(&mut server.unwrap(), false);
-    //     if res.is_err() {
-    //         return false;
-    //     }
-    //     true
-    // }
+    fn sync_aws(
+        &mut self,
+        region: String,
+        bucket: String,
+        access_key_id: String,
+        secret_access_key: String,
+        encryption_secret: String,
+    ) -> bool {
+        let secret: Vec<u8> = encryption_secret.into_bytes();
+
+        let credentials = tc::server::AwsCredentials::AccessKey {
+            access_key_id,
+            secret_access_key,
+        };
+
+        let server_config = tc::ServerConfig::Aws {
+            region: region,
+            bucket: bucket,
+            credentials: credentials,
+            encryption_secret: secret,
+        };
+        let server = server_config.into_server();
+        if server.is_err() {
+            return false;
+        }
+        let res = self.0.sync(&mut server.unwrap(), false);
+        if res.is_err() {
+            return false;
+        }
+        true
+    }
 
     fn create_task(
         &mut self,

@@ -58,12 +58,20 @@ extension ReplicaRefMut {
         __swift_bridge__$Replica$sync_local_server(ptr, { let rustString = server_dir.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
 
+    public func sync_no_server() -> Bool {
+        __swift_bridge__$Replica$sync_no_server(ptr)
+    }
+
     public func sync_remote_server<GenericIntoRustString: IntoRustString>(_ url: GenericIntoRustString, _ client_id: GenericIntoRustString, _ encryption_secret: GenericIntoRustString) -> Bool {
         __swift_bridge__$Replica$sync_remote_server(ptr, { let rustString = url.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = client_id.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
 
     public func sync_gcp<GenericIntoRustString: IntoRustString>(_ bucket: GenericIntoRustString, _ credential_path: Optional<GenericIntoRustString>, _ encryption_secret: GenericIntoRustString) -> Bool {
         __swift_bridge__$Replica$sync_gcp(ptr, { let rustString = bucket.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(credential_path) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
+    }
+
+    public func sync_aws<GenericIntoRustString: IntoRustString>(_ region: GenericIntoRustString, _ bucket: GenericIntoRustString, _ access_key_id: GenericIntoRustString, _ secret_access_key: GenericIntoRustString, _ encryption_secret: GenericIntoRustString) -> Bool {
+        __swift_bridge__$Replica$sync_aws(ptr, { let rustString = region.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = bucket.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = access_key_id.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = secret_access_key.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = encryption_secret.intoRustString(); rustString.isOwned = false; return rustString.ptr }())
     }
 
     public func create_task<GenericIntoRustString: IntoRustString>(_ uuid: GenericIntoRustString, _ description: GenericIntoRustString, _ due: Optional<GenericIntoRustString>, _ priority: Optional<GenericIntoRustString>, _ project: Optional<GenericIntoRustString>) -> Optional<Task> {
