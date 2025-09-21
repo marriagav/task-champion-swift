@@ -1,5 +1,6 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
-use taskchampion::{self as tc};
+use taskchampion::{self as tc, chrono::Utc};
 
 #[swift_bridge::bridge]
 mod ffi {
@@ -169,26 +170,38 @@ impl Replica {
     }
 
     fn sync_local_server(&mut self, server_dir: String) -> bool {
-        let server_config = tc::ServerConfig::Local {
-            server_dir: PathBuf::from(server_dir),
-        };
-        let server = server_config.into_server();
-        if server.is_err() {
-            return false;
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let server_config = tc::ServerConfig::Local {
+                server_dir: PathBuf::from(server_dir),
+            };
+            let server = server_config.into_server();
+            if server.is_err() {
+                return false;
+            }
+            let res = self.0.sync(&mut server.unwrap(), false);
+            if res.is_err() {
+                return false;
+            }
+            return true;
+        }));
+        match result {
+            Ok(val) => val,  // API returned a bool
+            Err(_) => false, // panic caught, return false
         }
-        let res = self.0.sync(&mut server.unwrap(), false);
-        if res.is_err() {
-            return false;
-        }
-        true
     }
 
     fn sync_no_server(&mut self) -> bool {
-        let res = self.0.rebuild_working_set(false);
-        if res.is_err() {
-            return false;
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let res = self.0.rebuild_working_set(false);
+            if res.is_err() {
+                return false;
+            }
+            return true;
+        }));
+        match result {
+            Ok(val) => val,  // API returned a bool
+            Err(_) => false, // panic caught, return false
         }
-        true
     }
 
     fn sync_remote_server(
@@ -197,27 +210,33 @@ impl Replica {
         client_id: String,
         encryption_secret: String,
     ) -> bool {
-        let uuid = tc::Uuid::parse_str(&client_id);
-        if uuid.is_err() {
-            return false;
-        }
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let uuid = tc::Uuid::parse_str(&client_id);
+            if uuid.is_err() {
+                return false;
+            }
 
-        let secret: Vec<u8> = encryption_secret.into_bytes();
+            let secret: Vec<u8> = encryption_secret.into_bytes();
 
-        let server_config = tc::ServerConfig::Remote {
-            url: url,
-            client_id: uuid.unwrap(),
-            encryption_secret: secret,
-        };
-        let server = server_config.into_server();
-        if server.is_err() {
-            return false;
+            let server_config = tc::ServerConfig::Remote {
+                url: url,
+                client_id: uuid.unwrap(),
+                encryption_secret: secret,
+            };
+            let server = server_config.into_server();
+            if server.is_err() {
+                return false;
+            }
+            let res = self.0.sync(&mut server.unwrap(), false);
+            if res.is_err() {
+                return false;
+            }
+            return true;
+        }));
+        match result {
+            Ok(val) => val,  // API returned a bool
+            Err(_) => false, // panic caught, return false
         }
-        let res = self.0.sync(&mut server.unwrap(), false);
-        if res.is_err() {
-            return false;
-        }
-        true
     }
 
     fn sync_gcp(
@@ -226,22 +245,28 @@ impl Replica {
         credential_path: Option<String>,
         encryption_secret: String,
     ) -> bool {
-        let secret: Vec<u8> = encryption_secret.into_bytes();
-        let server_config = tc::ServerConfig::Gcp {
-            bucket: bucket,
-            credential_path: credential_path,
-            encryption_secret: secret,
-        };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let secret: Vec<u8> = encryption_secret.into_bytes();
+            let server_config = tc::ServerConfig::Gcp {
+                bucket: bucket,
+                credential_path: credential_path,
+                encryption_secret: secret,
+            };
 
-        let server = server_config.into_server();
-        if server.is_err() {
-            return false;
+            let server = server_config.into_server();
+            if server.is_err() {
+                return false;
+            }
+            let res = self.0.sync(&mut server.unwrap(), false);
+            if res.is_err() {
+                return false;
+            }
+            return true;
+        }));
+        match result {
+            Ok(val) => val,  // API returned a bool
+            Err(_) => false, // panic caught, return false
         }
-        let res = self.0.sync(&mut server.unwrap(), false);
-        if res.is_err() {
-            return false;
-        }
-        true
     }
 
     fn sync_aws(
@@ -252,28 +277,34 @@ impl Replica {
         secret_access_key: String,
         encryption_secret: String,
     ) -> bool {
-        let secret: Vec<u8> = encryption_secret.into_bytes();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let secret: Vec<u8> = encryption_secret.into_bytes();
 
-        let credentials = tc::server::AwsCredentials::AccessKey {
-            access_key_id,
-            secret_access_key,
-        };
+            let credentials = tc::server::AwsCredentials::AccessKey {
+                access_key_id,
+                secret_access_key,
+            };
 
-        let server_config = tc::ServerConfig::Aws {
-            region: region,
-            bucket: bucket,
-            credentials: credentials,
-            encryption_secret: secret,
-        };
-        let server = server_config.into_server();
-        if server.is_err() {
-            return false;
+            let server_config = tc::ServerConfig::Aws {
+                region: region,
+                bucket: bucket,
+                credentials: credentials,
+                encryption_secret: secret,
+            };
+            let server = server_config.into_server();
+            if server.is_err() {
+                return false;
+            }
+            let res = self.0.sync(&mut server.unwrap(), false);
+            if res.is_err() {
+                return false;
+            }
+            true
+        }));
+        match result {
+            Ok(val) => val,  // API returned a bool
+            Err(_) => false, // panic caught, return false
         }
-        let res = self.0.sync(&mut server.unwrap(), false);
-        if res.is_err() {
-            return false;
-        }
-        true
     }
 
     fn create_task(
@@ -312,6 +343,11 @@ impl Replica {
 
         let priority = priority.unwrap_or_else(|| "none".to_string());
         let res = new_task.set_priority(priority, &mut ops);
+        if res.is_err() {
+            return None;
+        }
+
+        let res = new_task.set_entry(Some(Utc::now()), &mut ops);
         if res.is_err() {
             return None;
         }
