@@ -37,6 +37,18 @@ void* __swift_bridge__$Vec_TaskData$get_mut(void* vec_ptr, uintptr_t index);
 uintptr_t __swift_bridge__$Vec_TaskData$len(void* vec_ptr);
 void* __swift_bridge__$Vec_TaskData$as_ptr(void* vec_ptr);
 
+typedef struct Tag Tag;
+void __swift_bridge__$Tag$_free(void* self);
+
+void* __swift_bridge__$Vec_Tag$new(void);
+void __swift_bridge__$Vec_Tag$drop(void* vec_ptr);
+void __swift_bridge__$Vec_Tag$push(void* vec_ptr, void* item_ptr);
+void* __swift_bridge__$Vec_Tag$pop(void* vec_ptr);
+void* __swift_bridge__$Vec_Tag$get(void* vec_ptr, uintptr_t index);
+void* __swift_bridge__$Vec_Tag$get_mut(void* vec_ptr, uintptr_t index);
+uintptr_t __swift_bridge__$Vec_Tag$len(void* vec_ptr);
+void* __swift_bridge__$Vec_Tag$as_ptr(void* vec_ptr);
+
 typedef struct Task Task;
 void __swift_bridge__$Task$_free(void* self);
 
@@ -97,10 +109,13 @@ bool __swift_bridge__$Replica$sync_no_server(void* self);
 bool __swift_bridge__$Replica$sync_remote_server(void* self, void* url, void* client_id, void* encryption_secret);
 bool __swift_bridge__$Replica$sync_gcp(void* self, void* bucket, void* credential_path, void* encryption_secret);
 bool __swift_bridge__$Replica$sync_aws(void* self, void* region, void* bucket, void* access_key_id, void* secret_access_key, void* encryption_secret);
-void* __swift_bridge__$Replica$create_task(void* self, void* uuid, void* description, void* due, void* priority, void* project);
-void* __swift_bridge__$Replica$update_task(void* self, void* uuid, void* description, void* due, void* priority, void* project, void* status, void* annotations);
+void* __swift_bridge__$Replica$create_task(void* self, void* uuid, void* description, void* due, void* priority, void* project, void* tags);
+void* __swift_bridge__$Replica$update_task(void* self, void* uuid, void* description, void* due, void* priority, void* project, void* status, void* annotations, void* tags);
 void* __swift_bridge__$new_operations(void);
 void* __swift_bridge__$TaskData$get_uuid(void* self);
+void* __swift_bridge__$Tag$get_value(void* self);
+bool __swift_bridge__$Tag$is_synthetic(void* self);
+void* __swift_bridge__$create_tag(void* value);
 void* __swift_bridge__$Task$get_uuid(void* self);
 void* __swift_bridge__$Task$get_description(void* self);
 void* __swift_bridge__$Task$get_status(void* self);
@@ -108,6 +123,7 @@ void* __swift_bridge__$Task$get_due(void* self);
 void* __swift_bridge__$Task$get_priority(void* self);
 void* __swift_bridge__$Task$get_annotations(void* self);
 void* __swift_bridge__$Task$get_project(void* self);
+void* __swift_bridge__$Task$get_tags(void* self);
 void* __swift_bridge__$Annotation$get_description(void* self);
 void* __swift_bridge__$create_annotation(void* description, void* entry);
 void* __swift_bridge__$Status$get_value(void* self);

@@ -47,6 +47,7 @@ mod ffi {
             due: Option<String>,
             priority: Option<String>,
             project: Option<String>,
+            tags: Option<Vec<Tag>>,
         ) -> Option<Task>;
         fn update_task(
             &mut self,
@@ -57,6 +58,7 @@ mod ffi {
             project: Option<String>,
             status: String,
             annotations: Option<Vec<Annotation>>,
+            tags: Option<Vec<Tag>>,
         ) -> Option<Task>;
     }
 
@@ -73,6 +75,14 @@ mod ffi {
     }
 
     extern "Rust" {
+        type Tag;
+
+        fn get_value(&self) -> String;
+        fn is_synthetic(&self) -> bool;
+        fn create_tag(value: String) -> Option<Tag>;
+    }
+
+    extern "Rust" {
         type Task;
 
         fn get_uuid(&self) -> Uuid;
@@ -82,6 +92,7 @@ mod ffi {
         fn get_priority(&self) -> String;
         fn get_annotations(&self) -> Vec<Annotation>;
         fn get_project(&self) -> Option<String>;
+        fn get_tags(&self) -> Vec<Tag>;
     }
 
     extern "Rust" {
@@ -314,6 +325,7 @@ impl Replica {
         due: Option<String>,
         priority: Option<String>,
         project: Option<String>,
+        tags: Option<Vec<Tag>>,
     ) -> Option<Task> {
         let replica = &mut self.0;
         let mut ops = tc::Operations::new();
@@ -352,6 +364,13 @@ impl Replica {
             return None;
         }
 
+        for tag in tags.unwrap_or_default() {
+            let res = new_task.add_tag(&tag.0.clone(), &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
         if let Some(due) = due {
             let secs = due.parse::<i64>();
             if secs.is_err() {
@@ -381,6 +400,7 @@ impl Replica {
         project: Option<String>,
         status: String,
         annotations: Option<Vec<Annotation>>,
+        tags: Option<Vec<Tag>>,
     ) -> Option<Task> {
         let replica = &mut self.0;
         let uuid = tc::Uuid::parse_str(&uuid);
@@ -430,6 +450,25 @@ impl Replica {
 
         for annotation in annotations.unwrap_or_default() {
             let res = new_task.add_annotation(annotation.0.clone(), &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
+        let existing_tags = new_task.get_tags().into_iter().collect::<Vec<tc::Tag>>();
+
+        for tag in existing_tags {
+            if tag.is_synthetic() {
+                continue;
+            }
+            let res = new_task.remove_tag(&tag, &mut ops);
+            if res.is_err() {
+                return None;
+            }
+        }
+
+        for tag in tags.unwrap_or_default() {
+            let res = new_task.add_tag(&tag.0.clone(), &mut ops);
             if res.is_err() {
                 return None;
             }
@@ -489,6 +528,31 @@ impl TaskData {
     }
 }
 
+// TAG
+pub struct Tag(tc::Tag);
+impl From<tc::Tag> for Tag {
+    fn from(tag: tc::Tag) -> Self {
+        Tag(tag)
+    }
+}
+
+impl Tag {
+    fn get_value(&self) -> String {
+        self.0.to_string()
+    }
+    fn is_synthetic(&self) -> bool {
+        self.0.is_synthetic()
+    }
+}
+
+fn create_tag(value: String) -> Option<Tag> {
+    let tag = tc::Tag::try_from(value.as_str());
+    if tag.is_err() {
+        return None;
+    }
+    Some(Tag(tag.unwrap()))
+}
+
 // TASK
 
 pub struct Task(tc::Task);
@@ -532,6 +596,10 @@ impl Task {
             .into_iter()
             .map(Annotation::from)
             .collect()
+    }
+
+    fn get_tags(&self) -> Vec<Tag> {
+        self.0.get_tags().into_iter().map(Tag::from).collect()
     }
 
     fn get_project(&self) -> Option<String> {
