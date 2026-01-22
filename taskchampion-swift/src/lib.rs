@@ -185,7 +185,11 @@ impl Replica {
     fn all_tasks(&mut self) -> Option<Vec<Task>> {
         self.runtime.block_on(async {
             let mut tasks = self.inner.all_tasks().await.ok()?;
-            Some(tasks.drain().map(|(_, t)| Task(t)).collect())
+            let task_count = tasks.len();
+            eprintln!("[Replica] all_tasks() found {} tasks", task_count);
+            let result: Vec<Task> = tasks.drain().map(|(_, t)| Task(t)).collect();
+            eprintln!("[Replica] all_tasks() returning {} tasks", result.len());
+            Some(result)
         })
     }
 
@@ -199,45 +203,84 @@ impl Replica {
 
     fn pending_tasks(&mut self) -> Option<Vec<Task>> {
         self.runtime.block_on(async {
+            eprintln!("[Replica] pending_tasks() called");
             let mut tasks = self.inner.pending_tasks().await.ok()?;
-            Some(tasks.drain(..).map(Task).collect())
+            let task_count = tasks.len();
+            eprintln!("[Replica] pending_tasks() found {} tasks", task_count);
+            let result: Vec<Task> = tasks.drain(..).map(Task).collect();
+            eprintln!("[Replica] pending_tasks() returning {} tasks", result.len());
+            Some(result)
         })
     }
 
     fn sync_local_server(&mut self, server_dir: String) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
+                eprintln!("[Local Sync] Starting sync with server dir: {}", server_dir);
+                
                 let server_config = tc::ServerConfig::Local {
-                    server_dir: PathBuf::from(server_dir),
+                    server_dir: PathBuf::from(server_dir.clone()),
                 };
+                
+                eprintln!("[Local Sync] Creating server connection...");
                 let mut server = match server_config.into_server().await {
-                    Ok(s) => s,
-                    Err(_) => return false,
+                    Ok(s) => {
+                        eprintln!("[Local Sync] Server connection created successfully");
+                        s
+                    },
+                    Err(e) => {
+                        eprintln!("[Local Sync] ERROR: Failed to create server: {:?}", e);
+                        eprintln!("[Local Sync] Error details: {}", e);
+                        return false;
+                    },
                 };
+                
+                eprintln!("[Local Sync] Starting synchronization...");
                 match self.inner.sync(&mut server, false).await {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => {
+                        eprintln!("[Local Sync] Sync completed successfully");
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("[Local Sync] ERROR: Sync failed: {:?}", e);
+                        eprintln!("[Local Sync] Error details: {}", e);
+                        false
+                    },
                 }
             })
         }));
         match result {
-            Ok(val) => val,  // API returned a bool
-            Err(_) => false, // panic caught, return false
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[Local Sync] PANIC: Caught panic during sync: {:?}", e);
+                false
+            }
         }
     }
 
     fn sync_no_server(&mut self) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
+                eprintln!("[No Server Sync] Rebuilding working set (local-only sync)...");
                 match self.inner.rebuild_working_set(false).await {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => {
+                        eprintln!("[No Server Sync] Working set rebuilt successfully");
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("[No Server Sync] ERROR: Failed to rebuild working set: {:?}", e);
+                        eprintln!("[No Server Sync] Error details: {}", e);
+                        false
+                    },
                 }
             })
         }));
         match result {
-            Ok(val) => val,  // API returned a bool
-            Err(_) => false, // panic caught, return false
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[No Server Sync] PANIC: Caught panic during sync: {:?}", e);
+                false
+            }
         }
     }
 
@@ -249,31 +292,62 @@ impl Replica {
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
+                eprintln!("[Remote Sync] Starting sync with URL: {}", url);
+                eprintln!("[Remote Sync] Client ID: {}", client_id);
+                
                 let uuid = match tc::Uuid::parse_str(&client_id) {
-                    Ok(u) => u,
-                    Err(_) => return false,
+                    Ok(u) => {
+                        eprintln!("[Remote Sync] Client UUID parsed successfully");
+                        u
+                    },
+                    Err(e) => {
+                        eprintln!("[Remote Sync] ERROR: Failed to parse client UUID: {}", e);
+                        return false;
+                    },
                 };
 
                 let secret: Vec<u8> = encryption_secret.into_bytes();
+                eprintln!("[Remote Sync] Encryption secret length: {} bytes", secret.len());
 
                 let server_config = tc::ServerConfig::Remote {
-                    url,
+                    url: url.clone(),
                     client_id: uuid,
                     encryption_secret: secret,
                 };
+                
+                eprintln!("[Remote Sync] Creating server connection...");
                 let mut server = match server_config.into_server().await {
-                    Ok(s) => s,
-                    Err(_) => return false,
+                    Ok(s) => {
+                        eprintln!("[Remote Sync] Server connection created successfully");
+                        s
+                    },
+                    Err(e) => {
+                        eprintln!("[Remote Sync] ERROR: Failed to create server: {:?}", e);
+                        eprintln!("[Remote Sync] Error details: {}", e);
+                        return false;
+                    },
                 };
+                
+                eprintln!("[Remote Sync] Starting synchronization...");
                 match self.inner.sync(&mut server, false).await {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => {
+                        eprintln!("[Remote Sync] Sync completed successfully");
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("[Remote Sync] ERROR: Sync failed: {:?}", e);
+                        eprintln!("[Remote Sync] Error details: {}", e);
+                        false
+                    },
                 }
             })
         }));
         match result {
-            Ok(val) => val,  // API returned a bool
-            Err(_) => false, // panic caught, return false
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[Remote Sync] PANIC: Caught panic during sync: {:?}", e);
+                false
+            }
         }
     }
 
@@ -285,26 +359,102 @@ impl Replica {
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
+                eprintln!("[GCP Sync] Starting sync with bucket: {}", bucket);
+                if let Some(ref path) = credential_path {
+                    eprintln!("[GCP Sync] Using credential path: {}", path);
+                } else {
+                    eprintln!("[GCP Sync] Using default credentials (ADC)");
+                }
+                
                 let secret: Vec<u8> = encryption_secret.into_bytes();
+                eprintln!("[GCP Sync] Encryption secret length: {} bytes", secret.len());
+                
+                // Warn about short encryption secrets
+                if secret.len() < 16 {
+                    eprintln!("[GCP Sync] WARNING: Encryption secret is very short ({} bytes)", secret.len());
+                    eprintln!("[GCP Sync] WARNING: Recommended minimum is 32 bytes for security");
+                    eprintln!("[GCP Sync] WARNING: Short secrets may cause encryption/decryption failures");
+                } else if secret.len() < 32 {
+                    eprintln!("[GCP Sync] WARNING: Encryption secret is shorter than recommended (< 32 bytes)");
+                }
+                
                 let server_config = tc::ServerConfig::Gcp {
-                    bucket,
-                    credential_path,
+                    bucket: bucket.clone(),
+                    credential_path: credential_path.clone(),
                     encryption_secret: secret,
                 };
 
+                eprintln!("[GCP Sync] Creating server connection...");
                 let mut server = match server_config.into_server().await {
-                    Ok(s) => s,
-                    Err(_) => return false,
+                    Ok(s) => {
+                        eprintln!("[GCP Sync] Server connection created successfully");
+                        s
+                    },
+                    Err(e) => {
+                        eprintln!("[GCP Sync] ERROR: Failed to create server: {:?}", e);
+                        eprintln!("[GCP Sync] Error details: {}", e);
+                        return false;
+                    },
                 };
+                
+                eprintln!("[GCP Sync] Starting synchronization...");
                 match self.inner.sync(&mut server, false).await {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => {
+                        eprintln!("[GCP Sync] Sync completed successfully");
+                        
+                        // Verify task count after sync
+                        eprintln!("[GCP Sync] Checking task count after sync...");
+                        match self.inner.all_tasks().await {
+                            Ok(all_tasks) => {
+                                let all_count = all_tasks.len();
+                                eprintln!("[GCP Sync] Total tasks after sync: {}", all_count);
+                            },
+                            Err(e) => {
+                                eprintln!("[GCP Sync] WARNING: Could not retrieve tasks after sync: {:?}", e);
+                            }
+                        }
+                        
+                        match self.inner.pending_tasks().await {
+                            Ok(pending_tasks) => {
+                                let pending_count = pending_tasks.len();
+                                eprintln!("[GCP Sync] Pending tasks after sync: {}", pending_count);
+                            },
+                            Err(e) => {
+                                eprintln!("[GCP Sync] WARNING: Could not retrieve pending tasks after sync: {:?}", e);
+                            }
+                        }
+                        
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("[GCP Sync] ERROR: Sync failed: {:?}", e);
+                        eprintln!("[GCP Sync] Error details: {}", e);
+                        
+                        // Provide helpful hints based on error type
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("unsealing") || error_str.contains("Unspecified") {
+                            eprintln!("[GCP Sync] HINT: This is likely an encryption key mismatch");
+                            eprintln!("[GCP Sync] HINT: Possible causes:");
+                            eprintln!("[GCP Sync] HINT:   1. Different encryption secret than what was used to encrypt existing data");
+                            eprintln!("[GCP Sync] HINT:   2. Encryption secret is too short (use at least 32 bytes)");
+                            eprintln!("[GCP Sync] HINT:   3. Corrupted data on the server");
+                            eprintln!("[GCP Sync] HINT: Solutions:");
+                            eprintln!("[GCP Sync] HINT:   - Use the same encryption secret you used before");
+                            eprintln!("[GCP Sync] HINT:   - OR delete the bucket contents and start fresh");
+                            eprintln!("[GCP Sync] HINT:   - OR use a longer encryption secret (32+ bytes recommended)");
+                        }
+                        
+                        false
+                    },
                 }
             })
         }));
         match result {
-            Ok(val) => val,  // API returned a bool
-            Err(_) => false, // panic caught, return false
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[GCP Sync] PANIC: Caught panic during sync: {:?}", e);
+                false
+            }
         }
     }
 
@@ -318,34 +468,106 @@ impl Replica {
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
+                eprintln!("[AWS Sync] Starting sync with bucket: {} in region: {}", bucket, region);
+                eprintln!("[AWS Sync] Access key ID: {}...", &access_key_id.chars().take(8).collect::<String>());
+                
                 let secret: Vec<u8> = encryption_secret.into_bytes();
+                eprintln!("[AWS Sync] Encryption secret length: {} bytes", secret.len());
+                
+                // Warn about short encryption secrets
+                if secret.len() < 16 {
+                    eprintln!("[AWS Sync] WARNING: Encryption secret is very short ({} bytes)", secret.len());
+                    eprintln!("[AWS Sync] WARNING: Recommended minimum is 32 bytes for security");
+                    eprintln!("[AWS Sync] WARNING: Short secrets may cause encryption/decryption failures");
+                } else if secret.len() < 32 {
+                    eprintln!("[AWS Sync] WARNING: Encryption secret is shorter than recommended (< 32 bytes)");
+                }
 
                 let credentials = tc::server::AwsCredentials::AccessKey {
-                    access_key_id,
-                    secret_access_key,
+                    access_key_id: access_key_id.clone(),
+                    secret_access_key: secret_access_key.clone(),
                 };
 
                 let server_config = tc::ServerConfig::Aws {
-                    region: Some(region),
-                    bucket,
+                    region: Some(region.clone()),
+                    bucket: bucket.clone(),
                     credentials,
                     encryption_secret: secret,
                     endpoint_url: None,
                     force_path_style: false,
                 };
+                
+                eprintln!("[AWS Sync] Creating server connection...");
                 let mut server = match server_config.into_server().await {
-                    Ok(s) => s,
-                    Err(_) => return false,
+                    Ok(s) => {
+                        eprintln!("[AWS Sync] Server connection created successfully");
+                        s
+                    },
+                    Err(e) => {
+                        eprintln!("[AWS Sync] ERROR: Failed to create server: {:?}", e);
+                        eprintln!("[AWS Sync] Error details: {}", e);
+                        return false;
+                    },
                 };
+                
+                eprintln!("[AWS Sync] Starting synchronization...");
                 match self.inner.sync(&mut server, false).await {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => {
+                        eprintln!("[AWS Sync] Sync completed successfully");
+                        
+                        // Verify task count after sync
+                        eprintln!("[AWS Sync] Checking task count after sync...");
+                        match self.inner.all_tasks().await {
+                            Ok(all_tasks) => {
+                                let all_count = all_tasks.len();
+                                eprintln!("[AWS Sync] Total tasks after sync: {}", all_count);
+                            },
+                            Err(e) => {
+                                eprintln!("[AWS Sync] WARNING: Could not retrieve tasks after sync: {:?}", e);
+                            }
+                        }
+                        
+                        match self.inner.pending_tasks().await {
+                            Ok(pending_tasks) => {
+                                let pending_count = pending_tasks.len();
+                                eprintln!("[AWS Sync] Pending tasks after sync: {}", pending_count);
+                            },
+                            Err(e) => {
+                                eprintln!("[AWS Sync] WARNING: Could not retrieve pending tasks after sync: {:?}", e);
+                            }
+                        }
+                        
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("[AWS Sync] ERROR: Sync failed: {:?}", e);
+                        eprintln!("[AWS Sync] Error details: {}", e);
+                        
+                        // Provide helpful hints based on error type
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("unsealing") || error_str.contains("Unspecified") {
+                            eprintln!("[AWS Sync] HINT: This is likely an encryption key mismatch");
+                            eprintln!("[AWS Sync] HINT: Possible causes:");
+                            eprintln!("[AWS Sync] HINT:   1. Different encryption secret than what was used to encrypt existing data");
+                            eprintln!("[AWS Sync] HINT:   2. Encryption secret is too short (use at least 32 bytes)");
+                            eprintln!("[AWS Sync] HINT:   3. Corrupted data on the server");
+                            eprintln!("[AWS Sync] HINT: Solutions:");
+                            eprintln!("[AWS Sync] HINT:   - Use the same encryption secret you used before");
+                            eprintln!("[AWS Sync] HINT:   - OR delete the bucket contents and start fresh");
+                            eprintln!("[AWS Sync] HINT:   - OR use a longer encryption secret (32+ bytes recommended)");
+                        }
+                        
+                        false
+                    },
                 }
             })
         }));
         match result {
-            Ok(val) => val,  // API returned a bool
-            Err(_) => false, // panic caught, return false
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[AWS Sync] PANIC: Caught panic during sync: {:?}", e);
+                false
+            }
         }
     }
 
@@ -359,11 +581,12 @@ impl Replica {
         tags: Option<Vec<Tag>>,
     ) -> Option<Task> {
         self.runtime.block_on(async {
+            eprintln!("[Replica] create_task() called for: {}", description);
             let mut ops = tc::Operations::new();
             let uuid = tc::Uuid::parse_str(&uuid).ok()?;
             let mut new_task = self.inner.create_task(uuid, &mut ops).await.ok()?;
 
-            new_task.set_description(description, &mut ops).ok()?;
+            new_task.set_description(description.clone(), &mut ops).ok()?;
             new_task.set_status(tc::Status::Pending, &mut ops).ok()?;
             new_task.set_value("project", project, &mut ops).ok()?;
 
@@ -382,6 +605,7 @@ impl Replica {
             }
 
             self.inner.commit_operations(ops).await.ok()?;
+            eprintln!("[Replica] create_task() successfully created task: {}", description);
             Some(Task(new_task))
         })
     }
