@@ -1,6 +1,24 @@
+use async_trait::async_trait;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use taskchampion::{self as tc, chrono::Utc};
+
+// Storage wrapper to handle both InMemory and OnDisk storage types
+enum StorageWrapper {
+    InMemory(tc::storage::inmemory::InMemoryStorage),
+    OnDisk(tc::SqliteStorage),
+}
+
+// Implement the Storage trait for our wrapper
+#[async_trait]
+impl tc::storage::Storage for StorageWrapper {
+    async fn txn<'a>(&'a mut self) -> Result<Box<dyn tc::storage::StorageTxn + Send + 'a>, tc::Error> {
+        match self {
+            StorageWrapper::InMemory(s) => s.txn().await,
+            StorageWrapper::OnDisk(s) => s.txn().await,
+        }
+    }
+}
 
 #[swift_bridge::bridge]
 mod ffi {
@@ -118,25 +136,35 @@ mod ffi {
 
 // REPLICA
 
-pub struct Replica(tc::Replica);
+pub struct Replica {
+    inner: tc::Replica<StorageWrapper>,
+    runtime: tokio::runtime::Runtime,
+}
 
 fn new_replica_in_memory() -> Replica {
-    let replica = tc::Replica::new(tc::StorageConfig::InMemory.into_storage().unwrap());
-    Replica(replica)
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let storage = StorageWrapper::InMemory(tc::storage::inmemory::InMemoryStorage::new());
+    let replica = tc::Replica::new(storage);
+    Replica {
+        inner: replica,
+        runtime,
+    }
 }
 
 fn new_replica_on_disk(taskdb_dir: String, create_if_missing: bool, read_write: bool) -> Replica {
     use tc::storage::AccessMode::*;
     let access_mode = if read_write { ReadWrite } else { ReadOnly };
-    let storage = tc::StorageConfig::OnDisk {
-        taskdb_dir: PathBuf::from(taskdb_dir),
-        create_if_missing,
-        access_mode,
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let storage = runtime.block_on(async {
+        tc::SqliteStorage::new(PathBuf::from(taskdb_dir), access_mode, create_if_missing)
+            .await
+            .unwrap()
+    });
+    let replica = tc::Replica::new(StorageWrapper::OnDisk(storage));
+    Replica {
+        inner: replica,
+        runtime,
     }
-    .into_storage()
-    .unwrap();
-    let replica = tc::Replica::new(storage);
-    Replica(replica)
 }
 
 /// Utility function for Replica methods using Operations.
@@ -148,52 +176,49 @@ fn to_tc_operations(ops: Vec<Operation>) -> Vec<tc::Operation> {
 
 impl Replica {
     fn all_task_data(&mut self) -> Option<Vec<TaskData>> {
-        let replica = &mut self.0;
-        let mut tasks = replica.all_task_data().unwrap();
-        Some(tasks.drain().map(|(_, t)| TaskData(t)).collect())
+        self.runtime.block_on(async {
+            let mut tasks = self.inner.all_task_data().await.ok()?;
+            Some(tasks.drain().map(|(_, t)| TaskData(t)).collect())
+        })
     }
 
     fn all_tasks(&mut self) -> Option<Vec<Task>> {
-        let replica = &mut self.0;
-        let mut tasks = replica.all_tasks().unwrap();
-        Some(tasks.drain().map(|(_, t)| Task(t)).collect())
+        self.runtime.block_on(async {
+            let mut tasks = self.inner.all_tasks().await.ok()?;
+            Some(tasks.drain().map(|(_, t)| Task(t)).collect())
+        })
     }
 
     fn get_task(&mut self, uuid: String) -> Option<Task> {
-        let replica = &mut self.0;
-        let uuid = tc::Uuid::parse_str(&uuid).ok()?;
-        let task = replica.get_task(uuid);
-        if task.is_err() {
-            return None;
-        }
-        let task = task.unwrap();
-        if task.is_none() {
-            return None;
-        }
-        let task = task.unwrap();
-        return Some(Task(task));
+        self.runtime.block_on(async {
+            let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+            let task = self.inner.get_task(uuid).await.ok()??;
+            Some(Task(task))
+        })
     }
 
     fn pending_tasks(&mut self) -> Option<Vec<Task>> {
-        let replica = &mut self.0;
-        let mut tasks = replica.pending_tasks().unwrap();
-        Some(tasks.drain(..).map(Task).collect())
+        self.runtime.block_on(async {
+            let mut tasks = self.inner.pending_tasks().await.ok()?;
+            Some(tasks.drain(..).map(Task).collect())
+        })
     }
 
     fn sync_local_server(&mut self, server_dir: String) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let server_config = tc::ServerConfig::Local {
-                server_dir: PathBuf::from(server_dir),
-            };
-            let server = server_config.into_server();
-            if server.is_err() {
-                return false;
-            }
-            let res = self.0.sync(&mut server.unwrap(), false);
-            if res.is_err() {
-                return false;
-            }
-            return true;
+            self.runtime.block_on(async {
+                let server_config = tc::ServerConfig::Local {
+                    server_dir: PathBuf::from(server_dir),
+                };
+                let mut server = match server_config.into_server().await {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                match self.inner.sync(&mut server, false).await {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            })
         }));
         match result {
             Ok(val) => val,  // API returned a bool
@@ -203,11 +228,12 @@ impl Replica {
 
     fn sync_no_server(&mut self) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let res = self.0.rebuild_working_set(false);
-            if res.is_err() {
-                return false;
-            }
-            return true;
+            self.runtime.block_on(async {
+                match self.inner.rebuild_working_set(false).await {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            })
         }));
         match result {
             Ok(val) => val,  // API returned a bool
@@ -222,27 +248,28 @@ impl Replica {
         encryption_secret: String,
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let uuid = tc::Uuid::parse_str(&client_id);
-            if uuid.is_err() {
-                return false;
-            }
+            self.runtime.block_on(async {
+                let uuid = match tc::Uuid::parse_str(&client_id) {
+                    Ok(u) => u,
+                    Err(_) => return false,
+                };
 
-            let secret: Vec<u8> = encryption_secret.into_bytes();
+                let secret: Vec<u8> = encryption_secret.into_bytes();
 
-            let server_config = tc::ServerConfig::Remote {
-                url: url,
-                client_id: uuid.unwrap(),
-                encryption_secret: secret,
-            };
-            let server = server_config.into_server();
-            if server.is_err() {
-                return false;
-            }
-            let res = self.0.sync(&mut server.unwrap(), false);
-            if res.is_err() {
-                return false;
-            }
-            return true;
+                let server_config = tc::ServerConfig::Remote {
+                    url,
+                    client_id: uuid,
+                    encryption_secret: secret,
+                };
+                let mut server = match server_config.into_server().await {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                match self.inner.sync(&mut server, false).await {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            })
         }));
         match result {
             Ok(val) => val,  // API returned a bool
@@ -257,22 +284,23 @@ impl Replica {
         encryption_secret: String,
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let secret: Vec<u8> = encryption_secret.into_bytes();
-            let server_config = tc::ServerConfig::Gcp {
-                bucket: bucket,
-                credential_path: credential_path,
-                encryption_secret: secret,
-            };
+            self.runtime.block_on(async {
+                let secret: Vec<u8> = encryption_secret.into_bytes();
+                let server_config = tc::ServerConfig::Gcp {
+                    bucket,
+                    credential_path,
+                    encryption_secret: secret,
+                };
 
-            let server = server_config.into_server();
-            if server.is_err() {
-                return false;
-            }
-            let res = self.0.sync(&mut server.unwrap(), false);
-            if res.is_err() {
-                return false;
-            }
-            return true;
+                let mut server = match server_config.into_server().await {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                match self.inner.sync(&mut server, false).await {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            })
         }));
         match result {
             Ok(val) => val,  // API returned a bool
@@ -289,28 +317,31 @@ impl Replica {
         encryption_secret: String,
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let secret: Vec<u8> = encryption_secret.into_bytes();
+            self.runtime.block_on(async {
+                let secret: Vec<u8> = encryption_secret.into_bytes();
 
-            let credentials = tc::server::AwsCredentials::AccessKey {
-                access_key_id,
-                secret_access_key,
-            };
+                let credentials = tc::server::AwsCredentials::AccessKey {
+                    access_key_id,
+                    secret_access_key,
+                };
 
-            let server_config = tc::ServerConfig::Aws {
-                region: region,
-                bucket: bucket,
-                credentials: credentials,
-                encryption_secret: secret,
-            };
-            let server = server_config.into_server();
-            if server.is_err() {
-                return false;
-            }
-            let res = self.0.sync(&mut server.unwrap(), false);
-            if res.is_err() {
-                return false;
-            }
-            true
+                let server_config = tc::ServerConfig::Aws {
+                    region: Some(region),
+                    bucket,
+                    credentials,
+                    encryption_secret: secret,
+                    endpoint_url: None,
+                    force_path_style: false,
+                };
+                let mut server = match server_config.into_server().await {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                match self.inner.sync(&mut server, false).await {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            })
         }));
         match result {
             Ok(val) => val,  // API returned a bool
@@ -327,68 +358,32 @@ impl Replica {
         project: Option<String>,
         tags: Option<Vec<Tag>>,
     ) -> Option<Task> {
-        let replica = &mut self.0;
-        let mut ops = tc::Operations::new();
-        let uuid = tc::Uuid::parse_str(&uuid);
-        if uuid.is_err() {
-            return None;
-        }
-        let task = replica.create_task(uuid.unwrap(), &mut ops);
-        if task.is_err() {
-            return None;
-        }
+        self.runtime.block_on(async {
+            let mut ops = tc::Operations::new();
+            let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+            let mut new_task = self.inner.create_task(uuid, &mut ops).await.ok()?;
 
-        let mut new_task = task.unwrap();
-        let res = new_task.set_description(description, &mut ops);
-        if res.is_err() {
-            return None;
-        }
+            new_task.set_description(description, &mut ops).ok()?;
+            new_task.set_status(tc::Status::Pending, &mut ops).ok()?;
+            new_task.set_value("project", project, &mut ops).ok()?;
 
-        let res = new_task.set_status(tc::Status::Pending, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-        let res = new_task.set_value("project", project, &mut ops);
-        if res.is_err() {
-            return None;
-        }
+            let priority = priority.unwrap_or_else(|| "none".to_string());
+            new_task.set_priority(priority, &mut ops).ok()?;
+            new_task.set_entry(Some(Utc::now()), &mut ops).ok()?;
 
-        let priority = priority.unwrap_or_else(|| "none".to_string());
-        let res = new_task.set_priority(priority, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        let res = new_task.set_entry(Some(Utc::now()), &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        for tag in tags.unwrap_or_default() {
-            let res = new_task.add_tag(&tag.0.clone(), &mut ops);
-            if res.is_err() {
-                return None;
+            for tag in tags.unwrap_or_default() {
+                new_task.add_tag(&tag.0.clone(), &mut ops).ok()?;
             }
-        }
 
-        if let Some(due) = due {
-            let secs = due.parse::<i64>();
-            if secs.is_err() {
-                return None;
+            if let Some(due) = due {
+                let secs = due.parse::<i64>().ok()?;
+                let timestamp = tc::utc_timestamp(secs);
+                new_task.set_due(Option::from(timestamp), &mut ops).ok()?;
             }
-            let timestamp = tc::utc_timestamp(secs.unwrap());
-            let res = new_task.set_due(Option::from(timestamp), &mut ops);
-            if res.is_err() {
-                return None;
-            }
-        }
 
-        let res = replica.commit_operations(ops);
-        if res.is_err() {
-            return None;
-        }
-
-        return Some(Task(new_task));
+            self.inner.commit_operations(ops).await.ok()?;
+            Some(Task(new_task))
+        })
     }
 
     fn update_task(
@@ -402,105 +397,56 @@ impl Replica {
         annotations: Option<Vec<Annotation>>,
         tags: Option<Vec<Tag>>,
     ) -> Option<Task> {
-        let replica = &mut self.0;
-        let uuid = tc::Uuid::parse_str(&uuid);
-        if uuid.is_err() {
-            return None;
-        }
+        self.runtime.block_on(async {
+            let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+            let mut new_task = self.inner.get_task(uuid).await.ok()??;
 
-        let task = replica.get_task(uuid.unwrap());
+            let mut ops = tc::Operations::new();
 
-        if task.is_err() {
-            return None;
-        }
+            new_task.set_description(description, &mut ops).ok()?;
+            new_task.set_status(tc::Status::Pending, &mut ops).ok()?;
+            new_task.set_value("project", project, &mut ops).ok()?;
 
-        let tasker = task.unwrap();
-        if tasker.is_none() {
-            return None;
-        }
-        let mut new_task = tasker.unwrap();
+            let priority = priority.unwrap_or_else(|| "none".to_string());
+            new_task.set_priority(priority, &mut ops).ok()?;
 
-        let mut ops = tc::Operations::new();
+            let status = status_from_string(&status);
+            new_task.set_status(status, &mut ops).ok()?;
 
-        let res = new_task.set_description(description, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        let res = new_task.set_status(tc::Status::Pending, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-        let res = new_task.set_value("project", project, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        let priority = priority.unwrap_or_else(|| "none".to_string());
-        let res = new_task.set_priority(priority, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        let status = status_from_string(&status);
-        let res = new_task.set_status(status, &mut ops);
-        if res.is_err() {
-            return None;
-        }
-
-        for annotation in annotations.unwrap_or_default() {
-            let res = new_task.add_annotation(annotation.0.clone(), &mut ops);
-            if res.is_err() {
-                return None;
+            for annotation in annotations.unwrap_or_default() {
+                new_task.add_annotation(annotation.0.clone(), &mut ops).ok()?;
             }
-        }
 
-        let existing_tags = new_task.get_tags().into_iter().collect::<Vec<tc::Tag>>();
+            let existing_tags = new_task.get_tags().into_iter().collect::<Vec<tc::Tag>>();
 
-        for tag in existing_tags {
-            if tag.is_synthetic() {
-                continue;
+            for tag in existing_tags {
+                if tag.is_synthetic() {
+                    continue;
+                }
+                new_task.remove_tag(&tag, &mut ops).ok()?;
             }
-            let res = new_task.remove_tag(&tag, &mut ops);
-            if res.is_err() {
-                return None;
-            }
-        }
 
-        for tag in tags.unwrap_or_default() {
-            let res = new_task.add_tag(&tag.0.clone(), &mut ops);
-            if res.is_err() {
-                return None;
+            for tag in tags.unwrap_or_default() {
+                new_task.add_tag(&tag.0.clone(), &mut ops).ok()?;
             }
-        }
 
-        if let Some(due) = due {
-            let secs = due.parse::<i64>();
-            if secs.is_err() {
-                return None;
+            if let Some(due) = due {
+                let secs = due.parse::<i64>().ok()?;
+                let timestamp = tc::utc_timestamp(secs);
+                new_task.set_due(Option::from(timestamp), &mut ops).ok()?;
+            } else {
+                new_task.set_due(None, &mut ops).ok()?;
             }
-            let timestamp = tc::utc_timestamp(secs.unwrap());
-            let res = new_task.set_due(Option::from(timestamp), &mut ops);
-            if res.is_err() {
-                return None;
-            }
-        } else {
-            let res = new_task.set_due(None, &mut ops);
-            if res.is_err() {
-                return None;
-            }
-        }
 
-        let res = replica.commit_operations(ops);
-        if res.is_err() {
-            return None;
-        }
-
-        return Some(Task(new_task));
+            self.inner.commit_operations(ops).await.ok()?;
+            Some(Task(new_task))
+        })
     }
 
     fn commit_operations(&mut self, ops: Vec<Operation>) {
-        self.0.commit_operations(to_tc_operations(ops));
+        let _ = self.runtime.block_on(async {
+            self.inner.commit_operations(to_tc_operations(ops)).await
+        });
     }
 }
 
