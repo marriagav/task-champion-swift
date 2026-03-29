@@ -438,6 +438,10 @@ extension TaskRef {
     public func get_tags() -> RustVec<Tag> {
         RustVec(ptr: __swift_bridge__$Task$get_tags(ptr))
     }
+
+    public func get_recur() -> Optional<RustString> {
+        { let val = __swift_bridge__$Task$get_recur(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
+    }
 }
 extension Task: Vectorizable {
     public static func vecOfSelfNew() -> UnsafeMutableRawPointer {

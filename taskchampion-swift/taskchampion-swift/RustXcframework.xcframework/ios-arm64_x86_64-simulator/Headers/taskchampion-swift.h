@@ -124,6 +124,7 @@ void* __swift_bridge__$Task$get_priority(void* self);
 void* __swift_bridge__$Task$get_annotations(void* self);
 void* __swift_bridge__$Task$get_project(void* self);
 void* __swift_bridge__$Task$get_tags(void* self);
+void* __swift_bridge__$Task$get_recur(void* self);
 void* __swift_bridge__$Annotation$get_description(void* self);
 void* __swift_bridge__$create_annotation(void* description, void* entry);
 void* __swift_bridge__$Status$get_value(void* self);

@@ -111,6 +111,7 @@ mod ffi {
         fn get_annotations(&self) -> Vec<Annotation>;
         fn get_project(&self) -> Option<String>;
         fn get_tags(&self) -> Vec<Tag>;
+        fn get_recur(&self) -> Option<String>;
     }
 
     extern "Rust" {
@@ -207,8 +208,14 @@ impl Replica {
             let mut tasks = self.inner.pending_tasks().await.ok()?;
             let task_count = tasks.len();
             eprintln!("[Replica] pending_tasks() found {} tasks", task_count);
-            let result: Vec<Task> = tasks.drain(..).map(Task).collect();
-            eprintln!("[Replica] pending_tasks() returning {} tasks", result.len());
+            // Filter out recurring template tasks - they are parent tasks that generate
+            // instances, not actionable tasks themselves
+            let result: Vec<Task> = tasks
+                .drain(..)
+                .filter(|t| !matches!(t.get_status(), tc::Status::Recurring))
+                .map(Task)
+                .collect();
+            eprintln!("[Replica] pending_tasks() returning {} tasks (after filtering recurring templates)", result.len());
             Some(result)
         })
     }
@@ -777,6 +784,16 @@ impl Task {
         let project = task_data.get("project");
         if let Some(project) = project {
             Some(project.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn get_recur(&self) -> Option<String> {
+        let task_data = self.0.clone().into_task_data();
+        let recur = task_data.get("recur");
+        if let Some(recur) = recur {
+            Some(recur.to_string())
         } else {
             None
         }
