@@ -78,6 +78,8 @@ mod ffi {
             annotations: Option<Vec<Annotation>>,
             tags: Option<Vec<Tag>>,
         ) -> Option<Task>;
+        fn start_task(&mut self, uuid: String) -> Option<Task>;
+        fn stop_task(&mut self, uuid: String) -> Option<Task>;
     }
 
     extern "Rust" {
@@ -112,6 +114,10 @@ mod ffi {
         fn get_project(&self) -> Option<String>;
         fn get_tags(&self) -> Vec<Tag>;
         fn get_recur(&self) -> Option<String>;
+        fn get_start(&self) -> Option<String>;
+        fn get_scheduled(&self) -> Option<String>;
+        fn get_until(&self) -> Option<String>;
+        fn get_modified(&self) -> Option<String>;
     }
 
     extern "Rust" {
@@ -679,6 +685,28 @@ impl Replica {
             self.inner.commit_operations(to_tc_operations(ops)).await
         });
     }
+
+    fn start_task(&mut self, uuid: String) -> Option<Task> {
+        self.runtime.block_on(async {
+            let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+            let mut task = self.inner.get_task(uuid).await.ok()??;
+            let mut ops = tc::Operations::new();
+            task.start(&mut ops).ok()?;
+            self.inner.commit_operations(ops).await.ok()?;
+            Some(Task(task))
+        })
+    }
+
+    fn stop_task(&mut self, uuid: String) -> Option<Task> {
+        self.runtime.block_on(async {
+            let uuid = tc::Uuid::parse_str(&uuid).ok()?;
+            let mut task = self.inner.get_task(uuid).await.ok()??;
+            let mut ops = tc::Operations::new();
+            task.stop(&mut ops).ok()?;
+            self.inner.commit_operations(ops).await.ok()?;
+            Some(Task(task))
+        })
+    }
 }
 
 // OPERATION
@@ -797,6 +825,26 @@ impl Task {
         } else {
             None
         }
+    }
+
+    fn get_start(&self) -> Option<String> {
+        let task_data = self.0.clone().into_task_data();
+        task_data.get("start").map(|s| s.to_string())
+    }
+
+    fn get_scheduled(&self) -> Option<String> {
+        let task_data = self.0.clone().into_task_data();
+        task_data.get("scheduled").map(|s| s.to_string())
+    }
+
+    fn get_until(&self) -> Option<String> {
+        let task_data = self.0.clone().into_task_data();
+        task_data.get("until").map(|s| s.to_string())
+    }
+
+    fn get_modified(&self) -> Option<String> {
+        let task_data = self.0.clone().into_task_data();
+        task_data.get("modified").map(|s| s.to_string())
     }
 }
 
