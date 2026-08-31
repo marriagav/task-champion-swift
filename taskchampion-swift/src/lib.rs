@@ -52,8 +52,10 @@ mod ffi {
         ) -> bool;
         fn sync_aws(
             &mut self,
-            region: String,
+            region: Option<String>,
             bucket: String,
+            endpoint_url: Option<String>,
+            force_path_style: bool,
             access_key_id: String,
             secret_access_key: String,
             encryption_secret: String,
@@ -473,27 +475,29 @@ impl Replica {
 
     fn sync_aws(
         &mut self,
-        region: String,
+        region: Option<String>,
         bucket: String,
+        endpoint_url: Option<String>,
+        force_path_style: bool,
         access_key_id: String,
         secret_access_key: String,
         encryption_secret: String,
     ) -> bool {
         let result = catch_unwind(AssertUnwindSafe(|| {
             self.runtime.block_on(async {
-                eprintln!("[AWS Sync] Starting sync with bucket: {} in region: {}", bucket, region);
-                eprintln!("[AWS Sync] Access key ID: {}...", &access_key_id.chars().take(8).collect::<String>());
+                eprintln!("[S3 Sync] Starting sync with bucket: {} in region: {:?}", bucket, region);
+                eprintln!("[S3 Sync] Access key ID: {}...", &access_key_id.chars().take(8).collect::<String>());
                 
                 let secret: Vec<u8> = encryption_secret.into_bytes();
-                eprintln!("[AWS Sync] Encryption secret length: {} bytes", secret.len());
+                eprintln!("[S3 Sync] Encryption secret length: {} bytes", secret.len());
                 
                 // Warn about short encryption secrets
                 if secret.len() < 16 {
-                    eprintln!("[AWS Sync] WARNING: Encryption secret is very short ({} bytes)", secret.len());
-                    eprintln!("[AWS Sync] WARNING: Recommended minimum is 32 bytes for security");
-                    eprintln!("[AWS Sync] WARNING: Short secrets may cause encryption/decryption failures");
+                    eprintln!("[S3 Sync] WARNING: Encryption secret is very short ({} bytes)", secret.len());
+                    eprintln!("[S3 Sync] WARNING: Recommended minimum is 32 bytes for security");
+                    eprintln!("[S3 Sync] WARNING: Short secrets may cause encryption/decryption failures");
                 } else if secret.len() < 32 {
-                    eprintln!("[AWS Sync] WARNING: Encryption secret is shorter than recommended (< 32 bytes)");
+                    eprintln!("[S3 Sync] WARNING: Encryption secret is shorter than recommended (< 32 bytes)");
                 }
 
                 let credentials = tc::server::AwsCredentials::AccessKey {
@@ -502,72 +506,72 @@ impl Replica {
                 };
 
                 let server_config = tc::ServerConfig::Aws {
-                    region: Some(region.clone()),
+                    region: region.clone(),
                     bucket: bucket.clone(),
+                    endpoint_url: endpoint_url.clone(),
+                    force_path_style,
                     credentials,
                     encryption_secret: secret,
-                    endpoint_url: None,
-                    force_path_style: false,
                 };
                 
-                eprintln!("[AWS Sync] Creating server connection...");
+                eprintln!("[S3 Sync] Creating server connection...");
                 let mut server = match server_config.into_server().await {
                     Ok(s) => {
-                        eprintln!("[AWS Sync] Server connection created successfully");
+                        eprintln!("[S3 Sync] Server connection created successfully");
                         s
                     },
                     Err(e) => {
-                        eprintln!("[AWS Sync] ERROR: Failed to create server: {:?}", e);
-                        eprintln!("[AWS Sync] Error details: {}", e);
+                        eprintln!("[S3 Sync] ERROR: Failed to create server: {:?}", e);
+                        eprintln!("[S3 Sync] Error details: {}", e);
                         return false;
                     },
                 };
                 
-                eprintln!("[AWS Sync] Starting synchronization...");
+                eprintln!("[S3 Sync] Starting synchronization...");
                 match self.inner.sync(&mut server, false).await {
                     Ok(_) => {
-                        eprintln!("[AWS Sync] Sync completed successfully");
+                        eprintln!("[S3 Sync] Sync completed successfully");
                         
                         // Verify task count after sync
-                        eprintln!("[AWS Sync] Checking task count after sync...");
+                        eprintln!("[S3 Sync] Checking task count after sync...");
                         match self.inner.all_tasks().await {
                             Ok(all_tasks) => {
                                 let all_count = all_tasks.len();
-                                eprintln!("[AWS Sync] Total tasks after sync: {}", all_count);
+                                eprintln!("[S3 Sync] Total tasks after sync: {}", all_count);
                             },
                             Err(e) => {
-                                eprintln!("[AWS Sync] WARNING: Could not retrieve tasks after sync: {:?}", e);
+                                eprintln!("[S3 Sync] WARNING: Could not retrieve tasks after sync: {:?}", e);
                             }
                         }
                         
                         match self.inner.pending_tasks().await {
                             Ok(pending_tasks) => {
                                 let pending_count = pending_tasks.len();
-                                eprintln!("[AWS Sync] Pending tasks after sync: {}", pending_count);
+                                eprintln!("[S3 Sync] Pending tasks after sync: {}", pending_count);
                             },
                             Err(e) => {
-                                eprintln!("[AWS Sync] WARNING: Could not retrieve pending tasks after sync: {:?}", e);
+                                eprintln!("[S3 Sync] WARNING: Could not retrieve pending tasks after sync: {:?}", e);
                             }
                         }
                         
                         true
                     },
                     Err(e) => {
-                        eprintln!("[AWS Sync] ERROR: Sync failed: {:?}", e);
-                        eprintln!("[AWS Sync] Error details: {}", e);
+                        eprintln!("[S3 Sync] ERROR: Sync failed: {:?}", e);
+                        eprintln!("[S3 Sync] Error details: {}", e);
                         
                         // Provide helpful hints based on error type
                         let error_str = format!("{:?}", e);
                         if error_str.contains("unsealing") || error_str.contains("Unspecified") {
-                            eprintln!("[AWS Sync] HINT: This is likely an encryption key mismatch");
-                            eprintln!("[AWS Sync] HINT: Possible causes:");
-                            eprintln!("[AWS Sync] HINT:   1. Different encryption secret than what was used to encrypt existing data");
-                            eprintln!("[AWS Sync] HINT:   2. Encryption secret is too short (use at least 32 bytes)");
-                            eprintln!("[AWS Sync] HINT:   3. Corrupted data on the server");
-                            eprintln!("[AWS Sync] HINT: Solutions:");
-                            eprintln!("[AWS Sync] HINT:   - Use the same encryption secret you used before");
-                            eprintln!("[AWS Sync] HINT:   - OR delete the bucket contents and start fresh");
-                            eprintln!("[AWS Sync] HINT:   - OR use a longer encryption secret (32+ bytes recommended)");
+                            eprintln!("[S3 Sync] HINT: This is likely an encryption key mismatch");
+                            eprintln!("[S3 Sync] HINT: Possible causes:");
+                            eprintln!("[S3 Sync] HINT:   1. Different encryption secret than what was used to encrypt existing data");
+                            eprintln!("[S3 Sync] HINT:   2. Encryption secret is too short (use at least 32 bytes)");
+                            eprintln!("[S3 Sync] HINT:   3. Corrupted data on the server");
+                            eprintln!("[S3 Sync] HINT: Solutions:");
+                            eprintln!("[S3 Sync] HINT:   - Use the same encryption secret you used before");
+                            eprintln!("[S3 Sync] HINT:   - OR delete the bucket contents and start fresh");
+                            eprintln!("[S3 Sync] HINT:   - OR use a longer encryption secret (32+ bytes recommended)");
                         }
                         
                         false
@@ -578,7 +582,7 @@ impl Replica {
         match result {
             Ok(val) => val,
             Err(e) => {
-                eprintln!("[AWS Sync] PANIC: Caught panic during sync: {:?}", e);
+                eprintln!("[S3 Sync] PANIC: Caught panic during sync: {:?}", e);
                 false
             }
         }
