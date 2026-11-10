@@ -644,39 +644,64 @@ impl Replica {
 
             let mut ops = tc::Operations::new();
 
-            new_task.set_description(description, &mut ops).ok()?;
-            new_task.set_status(tc::Status::Pending, &mut ops).ok()?;
-            new_task.set_value("project", project, &mut ops).ok()?;
+            // Only write values that changed: every write is recorded as an operation.
+            if new_task.get_description() != description {
+                new_task.set_description(description, &mut ops).ok()?;
+            }
+
+            if new_task.get_value("project") != project.as_deref() {
+                new_task.set_value("project", project, &mut ops).ok()?;
+            }
 
             let priority = priority.unwrap_or_else(|| "none".to_string());
-            new_task.set_priority(priority, &mut ops).ok()?;
+            if new_task.get_priority() != priority {
+                new_task.set_priority(priority, &mut ops).ok()?;
+            }
 
+            // Set the status directly: going through Pending resets "end" on completed tasks.
             let status = status_from_string(&status);
-            new_task.set_status(status, &mut ops).ok()?;
+            if new_task.get_status() != status {
+                new_task.set_status(status, &mut ops).ok()?;
+            }
+
+            let existing_annotations = new_task.get_annotations().into_iter().collect::<Vec<tc::Annotation>>();
 
             for annotation in annotations.unwrap_or_default() {
+                if existing_annotations.contains(&annotation.0) {
+                    continue;
+                }
                 new_task.add_annotation(annotation.0.clone(), &mut ops).ok()?;
             }
 
             let existing_tags = new_task.get_tags().into_iter().collect::<Vec<tc::Tag>>();
+            let new_tags = tags.unwrap_or_default().into_iter().map(|tag| tag.0).collect::<Vec<tc::Tag>>();
 
-            for tag in existing_tags {
-                if tag.is_synthetic() {
+            for tag in &existing_tags {
+                if tag.is_synthetic() || new_tags.contains(tag) {
                     continue;
                 }
-                new_task.remove_tag(&tag, &mut ops).ok()?;
+                new_task.remove_tag(tag, &mut ops).ok()?;
             }
 
-            for tag in tags.unwrap_or_default() {
-                new_task.add_tag(&tag.0.clone(), &mut ops).ok()?;
+            for tag in &new_tags {
+                if existing_tags.contains(tag) {
+                    continue;
+                }
+                new_task.add_tag(tag, &mut ops).ok()?;
             }
 
-            if let Some(due) = due {
+            let new_due = if let Some(due) = due {
                 let secs = due.parse::<i64>().ok()?;
-                let timestamp = tc::utc_timestamp(secs);
-                new_task.set_due(Option::from(timestamp), &mut ops).ok()?;
+                Option::from(tc::utc_timestamp(secs))
             } else {
-                new_task.set_due(None, &mut ops).ok()?;
+                None
+            };
+            if new_task.get_due() != new_due {
+                new_task.set_due(new_due, &mut ops).ok()?;
+            }
+
+            if ops.is_empty() {
+                return Some(Task(new_task));
             }
 
             self.inner.commit_operations(ops).await.ok()?;
@@ -957,5 +982,192 @@ mod tests {
     fn create_uuid() {
         let uuid = uuid_v4();
         assert!(uuid.v[0] != 0);
+    }
+
+    // -- update_task: only changed fields are written --
+
+    use std::collections::BTreeSet;
+
+    const UUID: &str = "0a09d18c-f439-4129-bc95-954e718ee14e";
+    const DUE: &str = "1794348000";
+    const DESC: &str = "Wipe down toilet bowls";
+    const TAGS: &[&str] = &["chores", "nojournal"];
+
+    fn tags(names: &[&str]) -> Option<Vec<Tag>> {
+        Some(names.iter().map(|n| create_tag(n.to_string()).unwrap()).collect())
+    }
+
+    fn props(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A replica with one pending task: due DUE, priority M, project "home", tags TAGS.
+    fn replica_with_task() -> Replica {
+        let mut r = new_replica_in_memory();
+        r.create_task(
+            UUID.to_string(),
+            DESC.to_string(),
+            Some(DUE.to_string()),
+            Some("M".to_string()),
+            Some("home".to_string()),
+            tags(TAGS),
+        )
+        .unwrap();
+        r
+    }
+
+    /// Calls update_task with priority M and project "home", as the app does on save.
+    fn update(
+        r: &mut Replica,
+        description: &str,
+        due: Option<&str>,
+        status: &str,
+        tag_names: &[&str],
+        annotations: Option<Vec<Annotation>>,
+    ) -> Task {
+        r.update_task(
+            UUID.to_string(),
+            description.to_string(),
+            due.map(str::to_string),
+            Some("M".to_string()),
+            Some("home".to_string()),
+            status.to_string(),
+            annotations,
+            tags(tag_names),
+        )
+        .unwrap()
+    }
+
+    fn op_count(r: &mut Replica) -> usize {
+        r.runtime.block_on(r.inner.num_local_operations()).unwrap()
+    }
+
+    /// The properties changed by the task's last `n` operations.
+    fn changed_props(r: &mut Replica, n: usize) -> BTreeSet<String> {
+        let uuid = tc::Uuid::parse_str(UUID).unwrap();
+        let ops = r.runtime.block_on(r.inner.get_task_operations(uuid)).unwrap();
+        ops.iter()
+            .rev()
+            .take(n)
+            .filter_map(|op| match op {
+                tc::Operation::Update { property, .. } => Some(property.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn get_value(r: &mut Replica, property: &str) -> Option<String> {
+        let task = r.get_task(UUID.to_string()).unwrap();
+        task.0.get_value(property).map(str::to_string)
+    }
+
+    #[test]
+    fn update_with_unchanged_values_records_nothing() {
+        let mut r = replica_with_task();
+        let before = op_count(&mut r);
+        update(&mut r, DESC, Some(DUE), "pending", TAGS, None);
+        assert_eq!(op_count(&mut r), before);
+    }
+
+    #[test]
+    fn changing_due_only_writes_due_and_modified() {
+        let mut r = replica_with_task();
+        let before = op_count(&mut r);
+        let task = update(&mut r, DESC, Some("1794351600"), "pending", TAGS, None);
+        let added = op_count(&mut r) - before;
+        assert_eq!(changed_props(&mut r, added), props(&["due", "modified"]));
+        assert_eq!(task.get_due(), Some("1794351600".to_string()));
+    }
+
+    #[test]
+    fn swapping_one_tag_only_writes_that_tag() {
+        let mut r = replica_with_task();
+        let before = op_count(&mut r);
+        update(&mut r, DESC, Some(DUE), "pending", &["chores", "urgent"], None);
+        let added = op_count(&mut r) - before;
+        assert_eq!(
+            changed_props(&mut r, added),
+            props(&["modified", "tag_nojournal", "tag_urgent"])
+        );
+        assert_eq!(get_value(&mut r, "tag_chores"), Some(String::new()));
+        assert_eq!(get_value(&mut r, "tag_urgent"), Some(String::new()));
+        assert_eq!(get_value(&mut r, "tag_nojournal"), None);
+    }
+
+    #[test]
+    fn editing_completed_task_keeps_completion_time() {
+        let mut r = replica_with_task();
+        update(&mut r, DESC, Some(DUE), "completed", TAGS, None);
+        // Pin "end" to a known past time so that a rewrite is detectable.
+        let uuid = tc::Uuid::parse_str(UUID).unwrap();
+        let mut ops = tc::Operations::new();
+        let mut task = r.runtime.block_on(r.inner.get_task(uuid)).unwrap().unwrap();
+        task.set_value("end", Some("1000000000".to_string()), &mut ops).unwrap();
+        r.runtime.block_on(r.inner.commit_operations(ops)).unwrap();
+
+        update(&mut r, "Wipe down all toilet bowls", Some(DUE), "completed", TAGS, None);
+
+        assert_eq!(get_value(&mut r, "end"), Some("1000000000".to_string()));
+        assert_eq!(
+            get_value(&mut r, "description"),
+            Some("Wipe down all toilet bowls".to_string())
+        );
+    }
+
+    #[test]
+    fn status_changes_still_set_and_clear_end() {
+        let mut r = replica_with_task();
+        update(&mut r, DESC, Some(DUE), "completed", TAGS, None);
+        assert_eq!(get_value(&mut r, "status"), Some("completed".to_string()));
+        assert!(get_value(&mut r, "end").is_some());
+
+        update(&mut r, DESC, Some(DUE), "pending", TAGS, None);
+        assert_eq!(get_value(&mut r, "status"), Some("pending".to_string()));
+        assert_eq!(get_value(&mut r, "end"), None);
+    }
+
+    #[test]
+    fn missing_due_clears_due() {
+        let mut r = replica_with_task();
+        update(&mut r, DESC, None, "pending", TAGS, None);
+        assert_eq!(get_value(&mut r, "due"), None);
+    }
+
+    #[test]
+    fn missing_priority_is_stored_as_none() {
+        let mut r = replica_with_task();
+        r.update_task(
+            UUID.to_string(),
+            DESC.to_string(),
+            Some(DUE.to_string()),
+            None,
+            Some("home".to_string()),
+            "pending".to_string(),
+            None,
+            tags(TAGS),
+        )
+        .unwrap();
+        assert_eq!(get_value(&mut r, "priority"), Some("none".to_string()));
+    }
+
+    #[test]
+    fn existing_annotation_is_not_written_again() {
+        let mut r = replica_with_task();
+        let note = || {
+            Some(vec![create_annotation(
+                "task-note: chores".to_string(),
+                "1794340000".to_string(),
+            )
+            .unwrap()])
+        };
+        update(&mut r, DESC, Some(DUE), "pending", TAGS, note());
+        assert_eq!(
+            get_value(&mut r, "annotation_1794340000"),
+            Some("task-note: chores".to_string())
+        );
+
+        let before = op_count(&mut r);
+        update(&mut r, DESC, Some(DUE), "pending", TAGS, note());
+        assert_eq!(op_count(&mut r), before);
     }
 }
